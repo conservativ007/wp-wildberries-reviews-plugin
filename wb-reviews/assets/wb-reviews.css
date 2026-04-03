@@ -1,0 +1,138 @@
+.wb-reviews {
+  margin-top: 40px;
+  padding-top: 30px;
+  border-top: 2px solid #f0f0f0;
+}
+
+.wb-reviews__title {
+  font-size: 1.4em;
+  margin-bottom: 20px;
+  color: #222;
+}
+
+.wb-reviews__carousel {
+  position: relative;
+  overflow: hidden;
+}
+
+.wb-reviews__track {
+  display: flex;
+  gap: 10px;
+  transition: transform 0.4s ease;
+  align-items: stretch;
+  max-height: 350px;
+}
+
+.wb-reviews__item {
+  max-width: 340px;
+  min-width: 280px;
+  box-sizing: border-box;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 20px 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.wb-reviews__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  /* flex-wrap: wrap; */
+}
+
+.wb-reviews__author {
+  font-weight: 600;
+  color: #333;
+}
+
+.wb-reviews__star-icons {
+  color: #cb11ab;
+  font-size: 1.1em;
+  letter-spacing: 2px;
+}
+
+.wb-reviews__date {
+  color: #999;
+  font-size: 0.85em;
+  /* margin-left: auto; */
+}
+
+.wb-reviews__pros {
+  color: #2a7a2a;
+  margin: 6px 0;
+  font-size: 0.95em;
+}
+.wb-reviews__cons {
+  color: #b94a4a;
+  margin: 6px 0;
+  font-size: 0.95em;
+}
+.wb-reviews__text {
+  color: #444;
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
+.wb-reviews__btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: background 0.2s;
+}
+
+.wb-reviews__btn:hover {
+  background: #f5f5f5;
+}
+.wb-reviews__btn--prev {
+  left: 8px;
+}
+.wb-reviews__btn--next {
+  right: 8px;
+}
+
+.wb-reviews__dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.wb-reviews__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ddd;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.wb-reviews__dot.active {
+  background: #cb11ab;
+}
+
+.wb-reviews__photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wb-reviews__photo {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: pointer;
+}
