@@ -26,13 +26,24 @@
 .wb-reviews__item {
   max-width: 340px;
   min-width: 280px;
+  font-size: 14px;
   box-sizing: border-box;
   background: #fafafa;
   border: 1px solid #e8e8e8;
   border-radius: 8px;
-  padding: 20px 24px;
+  padding: 10px 10px;
+  padding-right: 5px;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.wb-reviews__item::-webkit-scrollbar {
+  width: 5px;
+}
+
+.wb-reviews__item::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
 }
 
 .wb-reviews__header {
@@ -135,4 +146,141 @@
   object-fit: cover;
   border-radius: 6px;
   cursor: pointer;
+}
+
+/* photo reviews */
+
+.wb-foto-reviews .flex {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
+
+  padding-bottom: 5px;
+}
+
+/* скрыть скроллбар */
+.wb-foto-reviews .flex::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-foto-reviews .flex {
+  scrollbar-width: none;
+}
+
+.wb-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.wb-lightbox.active {
+  display: flex;
+}
+
+.wb-lightbox__img {
+  max-width: 90%;
+  max-height: 90%;
+  border-radius: 8px;
+}
+
+.wb-lightbox__close {
+  position: absolute;
+  top: 20px;
+  right: 25px;
+  font-size: 32px;
+  color: #fff;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.wb-lightbox__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 28px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.3);
+  border: none;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.wb-lightbox__prev {
+  left: 20px;
+}
+.wb-lightbox__next {
+  right: 20px;
+}
+
+@media (max-width: 768px) {
+  .wb-reviews {
+    margin-top: 30px;
+    padding-top: 20px;
+  }
+
+  .wb-reviews__title {
+    font-size: 1.2em;
+    margin-bottom: 15px;
+  }
+
+  .wb-reviews__track {
+    gap: 8px;
+  }
+
+  .wb-reviews__item {
+    min-width: 240px;
+    max-width: 260px;
+    font-size: 13px;
+    padding: 10px;
+  }
+
+  .wb-reviews__btn {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .wb-reviews__carousel {
+    padding: 0 10%; /* ключевая штука */
+  }
+
+  .wb-reviews__track {
+    gap: 8px;
+  }
+
+  .wb-reviews__item {
+    min-width: 80%;
+    max-width: 80%;
+    padding-right: 5px;
+  }
+
+  /* кнопки убираем — свайп удобнее */
+  .wb-reviews__btn {
+    display: none;
+  }
+
+  .wb-reviews__dots {
+    margin-top: 10px;
+  }
+
+  .wb-reviews__dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .wb-reviews__photos {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+  }
 }

@@ -53,7 +53,7 @@ function wb_reviews_register_settings()
 
 function wb_reviews_settings_page()
 {
-?>
+    ?>
 <div class="wrap">
   <h1>WB Reviews — Настройки</h1>
   <form method="post" action="options.php">
@@ -225,7 +225,7 @@ function wb_reviews_fetch($nm_id)
 
     $url = add_query_arg([
         'isAnswered' => 'true',
-        'take' => 20,
+        'take' => 40,
         'skip' => 0,
         'nmId' => intval($nm_id),
     ], 'https://feedbacks-api.wildberries.ru/api/v1/feedbacks');
@@ -268,6 +268,20 @@ function wb_reviews_fetch($nm_id)
     }
 
     $feedbacks = $data['data']['feedbacks'] ?? [];
+
+    // Только отзывы от 4 звёзд и выше
+    $feedbacks = array_filter($feedbacks, function ($fb) {
+        return intval($fb['productValuation'] ?? 0) >= 4;
+    });
+
+    // Сортировка — сначала отзывы с текстом, потом без
+    usort($feedbacks, function ($a, $b) {
+        $aHasText = !empty($a['text']) || !empty($a['pros']) || !empty($a['cons']);
+        $bHasText = !empty($b['text']) || !empty($b['pros']) || !empty($b['cons']);
+        return $bHasText - $aHasText;
+    });
+
+    $feedbacks = array_slice($feedbacks, 0, 20);
 
     set_transient($cache_key, $feedbacks, 3600);
     // set_transient($cache_key, $feedbacks, $cache_time);
@@ -327,11 +341,11 @@ function wb_reviews_append_to_content($content)
         $rating = intval($fb['productValuation'] ?? 0);
         $text = esc_html($fb['text'] ?? '');
         $pros = esc_html($fb['pros'] ?? '');
-        $cons = esc_html($fb['cons'] ?? '');
+        // $cons = esc_html($fb['cons'] ?? '');
         $photoLinks = $fb['photoLinks'] ?? [];
         $date_raw = $fb['createdDate'] ?? '';
         $date = $date_raw ? date_i18n('d.m.Y', strtotime($date_raw)) : '';
-?>
+        ?>
       <div class="wb-reviews__item">
         <div class="wb-reviews__header">
           <span class="wb-reviews__author"><?php echo $author; ?></span>
@@ -366,6 +380,29 @@ function wb_reviews_append_to_content($content)
     <div class="wb-reviews__dots"></div>
   </div>
 </div>
+
+<div class="wb-foto-reviews">
+  <div class="section-separator-title">
+    <span>Фото покупателей</span>
+  </div>
+  <div class="flex justify-center gap-[5px]">
+    <?php
+    foreach ($feedbacks as $fb):
+        $photoLinks = $fb['photoLinks'] ?? [];
+        foreach ($photoLinks as $photo):
+            ?>
+    <img src="<?php echo esc_url($photo['fullSize']); ?>" alt="Фото отзыва" class="wb-reviews__photo" />
+    <?php endforeach; ?>
+    <?php endforeach; ?>
+  </div>
+
+  <div class="wb-lightbox" id="wbLightbox">
+    <button class="wb-lightbox__close">&times;</button>
+    <button class="wb-lightbox__nav wb-lightbox__prev">&#8592;</button>
+    <img class="wb-lightbox__img" src="" alt="">
+    <button class="wb-lightbox__nav wb-lightbox__next">&#8594;</button>
+  </div>
+</div>
 <?php
     $html = ob_get_clean();
 
@@ -379,6 +416,14 @@ function wb_reviews_append_to_content($content)
     wp_enqueue_script(
         'wb-reviews-frontend',
         WB_REVIEWS_PLUGIN_URL . 'assets/wb-reviews-frontend.js',
+        [],
+        WB_REVIEWS_VERSION,
+        true
+    );
+
+    wp_enqueue_script(
+        'wb-photo-reviews-frontend',
+        WB_REVIEWS_PLUGIN_URL . 'assets/wb-photo-reviews-frontend.js',
         [],
         WB_REVIEWS_VERSION,
         true
