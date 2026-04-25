@@ -1,21 +1,21 @@
 document.addEventListener("DOMContentLoaded", function () {
   // Диагностический запрос — виден во вкладке Network
-  if (typeof wb_reviews_data !== "undefined") {
-    fetch(
-      wb_reviews_data.ajaxurl +
-        "?action=wb_get_reviews&nm_id=" +
-        wb_reviews_data.nm_id,
-    )
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (data) {
-        console.log("[WB Reviews] Ответ API:", data);
-      })
-      .catch(function (err) {
-        console.error("[WB Reviews] Ошибка fetch:", err);
-      });
-  }
+  // if (typeof wb_reviews_data !== "undefined") {
+  //   fetch(
+  //     wb_reviews_data.ajaxurl +
+  //       "?action=wb_get_reviews&nm_id=" +
+  //       wb_reviews_data.nm_id,
+  //   )
+  //     .then(function (r) {
+  //       return r.json();
+  //     })
+  //     .then(function (data) {
+  //       console.log("[WB Reviews] Ответ API:", data);
+  //     })
+  //     .catch(function (err) {
+  //       console.error("[WB Reviews] Ошибка fetch:", err);
+  //     });
+  // }
 
   // ── Перемещаем блок перед .related-items.can-like ──
   var related = document.querySelector(".related-items.can-like");
@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", function () {
   var style = window.getComputedStyle(track);
   var gap = parseInt(style.gap) || 0;
 
-  console.log("gap ", gap);
+  // console.log("gap ", gap);
 
   var itemWidth = items[0].offsetWidth + gap;
   var visibleWidth = track.parentElement.offsetWidth;
