@@ -15,7 +15,7 @@ define('WB_REVIEWS_VERSION', '1.0.0');
 define('WB_REVIEWS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WB_REVIEWS_PLUGIN_URL', plugin_dir_url(__FILE__));
 
-require_once WB_REVIEWS_PLUGIN_DIR . 'includes/wb-reviews-warmup.php';
+// require_once WB_REVIEWS_PLUGIN_DIR . 'includes/wb-reviews-warmup.php';
 
 // ─── Настройки плагина ───────────────────────────────────────────────────────
 
@@ -196,12 +196,9 @@ function wb_reviews_ajax_clear_cache()
 
 function wb_reviews_fetch($nm_id)
 {
-    // Сбрасываем предыдущую ошибку
     delete_transient('wb_reviews_error_' . intval($nm_id));
 
     $api_key = defined('WB_API_KEY') ? WB_API_KEY : get_option('wb_reviews_api_key', '');
-    $take = (int) get_option('wb_reviews_take', 20);
-    $cache_time = (int) get_option('wb_reviews_cache_time', 3600);
 
     if (empty($api_key)) {
         $msg = '[WB Reviews] API-ключ не задан. Зайди в Настройки → WB Reviews.';
@@ -211,8 +208,7 @@ function wb_reviews_fetch($nm_id)
     }
 
     if (empty($nm_id)) {
-        $msg = '[WB Reviews] nmId не указан для записи.';
-        error_log($msg);
+        error_log('[WB Reviews] nmId не указан для записи.');
         return [];
     }
 
@@ -222,8 +218,6 @@ function wb_reviews_fetch($nm_id)
     if (false !== $cached) {
         return $cached;
     }
-
-    error_log('[WB Reviews] Используемый ключ: ' . substr($api_key, 0, 20) . '...');
 
     $url = add_query_arg([
         'isAnswered' => 'true',
@@ -252,30 +246,16 @@ function wb_reviews_fetch($nm_id)
     if ($code !== 200) {
         $msg = '[WB Reviews] API вернул код ' . $code . ' для nmId ' . $nm_id . '. Ответ: ' . $body;
         error_log($msg);
-        set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
 
-        // При 429 — ставим паузу на 10 минут чтобы не долбить API
         if ($code === 429) {
-            // Читаем заголовок — через сколько секунд можно повторить
             $retry_after = (int) wp_remote_retrieve_header($response, 'x-ratelimit-retry');
             if ($retry_after < 1)
-                $retry_after = 60;  // fallback
-
-            echo '<script>
-        console.warn("[WB Reviews] 429 лимит:");
-        console.table({
-            "x-ratelimit-retry":  ' . json_encode($retry_after) . ',
-            "x-ratelimit-reset":  ' . json_encode($reset) . ',
-            "x-ratelimit-limit":  ' . json_encode($limit) . ',
-        });
-    </script>';
-
+                $retry_after = 60;
             error_log('[WB Reviews] 429 для nmId ' . $nm_id . '. Повтор через ' . $retry_after . ' сек.');
-            set_transient($cache_key, [], $retry_after + 5);  // +5 сек запас
-            set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
-            return [];
+            set_transient($cache_key, [], $retry_after + 5);
         }
 
+        set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
         return [];
     }
 
@@ -289,17 +269,15 @@ function wb_reviews_fetch($nm_id)
     }
 
     if (empty($data['data']['feedbacks'])) {
-        error_log('[WB Reviews] Отзывы не найдены для nmId ' . $nm_id . '. Ответ: ' . $body);
+        error_log('[WB Reviews] Отзывы не найдены для nmId ' . $nm_id);
     }
 
     $feedbacks = $data['data']['feedbacks'] ?? [];
 
-    // Только отзывы от 4 звёзд и выше
     $feedbacks = array_filter($feedbacks, function ($fb) {
         return intval($fb['productValuation'] ?? 0) >= 4;
     });
 
-    // Сортировка — сначала отзывы с текстом, потом без
     usort($feedbacks, function ($a, $b) {
         $aHasText = !empty($a['text']) || !empty($a['pros']) || !empty($a['cons']);
         $bHasText = !empty($b['text']) || !empty($b['pros']) || !empty($b['cons']);
@@ -308,8 +286,7 @@ function wb_reviews_fetch($nm_id)
 
     $feedbacks = array_slice($feedbacks, 0, 20);
 
-    // set_transient($cache_key, $feedbacks, 3600);
-    set_transient($cache_key, $feedbacks, $cache_time);
+    set_transient($cache_key, $feedbacks, 10 * DAY_IN_SECONDS);
 
     return $feedbacks;
 }
