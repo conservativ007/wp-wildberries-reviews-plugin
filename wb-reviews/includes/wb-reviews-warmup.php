@@ -4,19 +4,12 @@ if (!defined('ABSPATH'))
 
 define('WB_WARMUP_LOG', WP_CONTENT_DIR . '/wb-warmup.log');
 
+wp_clear_scheduled_hook('wb_reviews_cache_warmup');
+
 function wb_warmup_log($msg)
 {
   $line = '[' . date('d-M-Y H:i:s') . ' UTC] ' . $msg . PHP_EOL;
   file_put_contents(WB_WARMUP_LOG, $line, FILE_APPEND);
-}
-
-register_activation_hook(WB_REVIEWS_PLUGIN_DIR . 'wb-reviews.php', 'wb_reviews_schedule_warmup');
-
-function wb_reviews_schedule_warmup()
-{
-  if (!wp_next_scheduled('wb_reviews_cache_warmup')) {
-    wp_schedule_event(time(), 'every_20_minutes', 'wb_reviews_cache_warmup');
-  }
 }
 
 function wb_reviews_get_warmup_queue()
@@ -75,18 +68,6 @@ function wb_reviews_remove_from_queue($nm_id)
 
   wb_reviews_update_warmup_queue($queue);
 }
-
-add_filter('cron_schedules', function ($schedules) {
-  $schedules['every_20_minutes'] = [
-    'interval' => 1200,
-    'display' => 'Every 20 minutes'
-  ];
-  return $schedules;
-});
-
-register_deactivation_hook(WB_REVIEWS_PLUGIN_DIR . 'wb-reviews.php', function () {
-  wp_clear_scheduled_hook('wb_reviews_cache_warmup');
-});
 
 add_action('wb_reviews_cache_warmup', 'wb_reviews_do_warmup');
 
