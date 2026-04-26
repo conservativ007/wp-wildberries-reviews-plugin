@@ -4,7 +4,7 @@
  * Plugin Name: WB Reviews
  * Description: Автоматически подтягивает отзывы с Wildberries по nmId товара и выводит их в конце контента.
  * Version: 1.0.0
- * Author: Your Name
+ * Author: Conservative
  * Text Domain: wb-reviews
  */
 if (!defined('ABSPATH')) {
@@ -15,7 +15,9 @@ define('WB_REVIEWS_VERSION', '1.0.0');
 define('WB_REVIEWS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WB_REVIEWS_PLUGIN_URL', plugin_dir_url(__FILE__));
 
-// require_once WB_REVIEWS_PLUGIN_DIR . 'includes/wb-reviews-warmup.php';
+require_once WB_REVIEWS_PLUGIN_DIR . 'includes/wb-reviews-db.php';
+require_once WB_REVIEWS_PLUGIN_DIR . 'includes/wb-reviews-frontend.php';
+require_once WB_REVIEWS_PLUGIN_DIR . 'includes/wb-reviews-warmup.php';
 
 // ─── Настройки плагина ───────────────────────────────────────────────────────
 
@@ -55,7 +57,7 @@ function wb_reviews_register_settings()
 
 function wb_reviews_settings_page()
 {
-    ?>
+?>
 <div class="wrap">
   <h1>WB Reviews — Настройки</h1>
   <form method="post" action="options.php">
@@ -164,13 +166,22 @@ function wb_reviews_save_metabox($post_id)
     if (!current_user_can('edit_post', $post_id))
         return;
 
+    $old_nm_id = get_post_meta($post_id, 'wb_nm_id', true);
     $nm_id = isset($_POST['wb_nm_id']) ? preg_replace('/\D/', '', $_POST['wb_nm_id']) : '';
 
     if ($nm_id) {
         update_post_meta($post_id, 'wb_nm_id', $nm_id);
-        // Сбрасываем кэш при сохранении новго nmId
+        if ($old_nm_id && $old_nm_id !== $nm_id) {
+            wb_reviews_remove_from_queue($old_nm_id);
+        }
+
+        // Сбрасываем кэш при сохранении нового nmId
         delete_transient('wb_reviews_' . $nm_id);
+        wb_reviews_queue_nm_id($nm_id, $post_id);
     } else {
+        if ($old_nm_id) {
+            wb_reviews_remove_from_queue($old_nm_id);
+        }
         delete_post_meta($post_id, 'wb_nm_id');
     }
 }
@@ -212,11 +223,15 @@ function wb_reviews_fetch($nm_id)
         return [];
     }
 
-    $cache_key = 'wb_reviews_' . intval($nm_id);
-    $cached = get_transient($cache_key);
+    // Сначала проверяем БД
+    $from_db = wb_reviews_get_from_db($nm_id);
+    if (!empty($from_db)) {
+        return $from_db;
+    }
 
-    if (false !== $cached) {
-        return $cached;
+    // Если в БД нет — не идём к API, крон прогреет позже
+    if (!defined('WB_REVIEWS_WARMUP') || !WB_REVIEWS_WARMUP) {
+        return [];
     }
 
     $url = add_query_arg([
@@ -228,9 +243,7 @@ function wb_reviews_fetch($nm_id)
 
     $response = wp_remote_get($url, [
         'timeout' => 15,
-        'headers' => [
-            'Authorization' => 'Bearer ' . $api_key,
-        ],
+        'headers' => ['Authorization' => 'Bearer ' . $api_key],
     ]);
 
     if (is_wp_error($response)) {
@@ -242,6 +255,7 @@ function wb_reviews_fetch($nm_id)
 
     $code = wp_remote_retrieve_response_code($response);
     $body = wp_remote_retrieve_body($response);
+    error_log('[WB Reviews] Код ответа: ' . $code . ' для nmId ' . $nm_id);
 
     if ($code !== 200) {
         $msg = '[WB Reviews] API вернул код ' . $code . ' для nmId ' . $nm_id . '. Ответ: ' . $body;
@@ -252,7 +266,7 @@ function wb_reviews_fetch($nm_id)
             if ($retry_after < 1)
                 $retry_after = 60;
             error_log('[WB Reviews] 429 для nmId ' . $nm_id . '. Повтор через ' . $retry_after . ' сек.');
-            set_transient($cache_key, [], $retry_after + 5);
+            set_transient('wb_reviews_retry_' . intval($nm_id), $retry_after, 3600);
         }
 
         set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
@@ -268,175 +282,16 @@ function wb_reviews_fetch($nm_id)
         return [];
     }
 
-    if (empty($data['data']['feedbacks'])) {
+    $feedbacks = $data['data']['feedbacks'] ?? [];
+    error_log('[WB Reviews] Получено отзывов: ' . count($feedbacks));
+
+    if (!empty($feedbacks)) {
+        wb_reviews_save_to_db($nm_id, $feedbacks);
+    } else {
         error_log('[WB Reviews] Отзывы не найдены для nmId ' . $nm_id);
     }
 
-    $feedbacks = $data['data']['feedbacks'] ?? [];
-
-    $feedbacks = array_filter($feedbacks, function ($fb) {
-        return intval($fb['productValuation'] ?? 0) >= 4;
-    });
-
-    usort($feedbacks, function ($a, $b) {
-        $aHasText = !empty($a['text']) || !empty($a['pros']) || !empty($a['cons']);
-        $bHasText = !empty($b['text']) || !empty($b['pros']) || !empty($b['cons']);
-        return $bHasText - $aHasText;
-    });
-
-    $feedbacks = array_slice($feedbacks, 0, 20);
-
-    set_transient($cache_key, $feedbacks, 10 * DAY_IN_SECONDS);
-
-    return $feedbacks;
-}
-
-// ─── Вывод отзывов ───────────────────────────────────────────────────────────
-
-add_filter('the_content', 'wb_reviews_append_to_content');
-
-function wb_reviews_append_to_content($content)
-{
-    if (!is_singular() || !in_the_loop() || !is_main_query()) {
-        return $content;
-    }
-
-    $field_name = get_option('wb_reviews_custom_field', 'wb_nm_id');
-    $nm_id = get_post_meta(get_the_ID(), $field_name, true);
-
-    if (empty($nm_id)) {
-        return $content;
-    }
-
-    $feedbacks = wb_reviews_fetch($nm_id);
-
-    // Пробрасываем ошибку в консоль браузера
-    $error_msg = get_transient('wb_reviews_error_' . intval($nm_id));
-    if ($error_msg) {
-        wp_enqueue_script(
-            'wb-reviews-debug',
-            WB_REVIEWS_PLUGIN_URL . 'assets/wb-reviews-debug.js',
-            [],
-            WB_REVIEWS_VERSION,
-            true
-        );
-        wp_localize_script('wb-reviews-debug', 'wb_reviews_error', [
-            'message' => $error_msg,
-        ]);
-    }
-
-    if (empty($feedbacks)) {
-        return $content;
-    }
-
-    ob_start();
-?>
-<div class="wb-reviews">
-  <div class="section-separator-title">
-    <span>Отзывы покупателей</span>
-  </div>
-  <div class="wb-reviews__carousel">
-    <div class="wb-reviews__track">
-      <?php
-    foreach ($feedbacks as $fb):
-        $author = esc_html($fb['userName'] ?? 'Аноним');
-        $rating = intval($fb['productValuation'] ?? 0);
-        $text = esc_html($fb['text'] ?? '');
-        $pros = esc_html($fb['pros'] ?? '');
-        // $cons = esc_html($fb['cons'] ?? '');
-        $photoLinks = $fb['photoLinks'] ?? [];
-        $date_raw = $fb['createdDate'] ?? '';
-        $date = $date_raw ? date_i18n('d.m.Y', strtotime($date_raw)) : '';
-        ?>
-      <div class="wb-reviews__item">
-        <div class="wb-reviews__header">
-          <span class="wb-reviews__author"><?php echo $author; ?></span>
-          <span class="wb-reviews__stars"><?php echo wb_reviews_stars($rating); ?></span>
-          <?php if ($date): ?>
-          <span class="wb-reviews__date"><?php echo $date; ?></span>
-          <?php endif; ?>
-        </div>
-        <?php if ($pros): ?>
-        <p class="wb-reviews__pros"><strong>Достоинства:</strong> <?php echo $pros; ?></p>
-        <?php endif; ?>
-        <?php if ($cons): ?>
-        <p class="wb-reviews__cons"><strong>Недостатки:</strong> <?php echo $cons; ?></p>
-        <?php endif; ?>
-        <?php if ($text): ?>
-        <p class="wb-reviews__text"><?php echo $text; ?></p>
-        <?php endif; ?>
-        <?php if ($photoLinks): ?>
-        <div class="wb-reviews__photos">
-          <?php foreach ($photoLinks as $photo): ?>
-          <a href="<?php echo esc_url($photo['fullSize']); ?>" target="_blank">
-            <img src="<?php echo esc_url($photo['miniSize']); ?>" alt="Фото отзыва" class="wb-reviews__photo" />
-          </a>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-      </div>
-      <?php endforeach; ?>
-    </div>
-    <button class="wb-reviews__btn wb-reviews__btn--prev" aria-label="Назад">&#8592;</button>
-    <button class="wb-reviews__btn wb-reviews__btn--next" aria-label="Вперёд">&#8594;</button>
-    <div class="wb-reviews__dots"></div>
-  </div>
-</div>
-
-<div class="wb-foto-reviews">
-  <div class="section-separator-title">
-    <span>Фото покупателей</span>
-  </div>
-  <div class="flex justify-center gap-[5px]">
-    <?php
-    foreach ($feedbacks as $fb):
-        $photoLinks = $fb['photoLinks'] ?? [];
-        foreach ($photoLinks as $photo):
-            ?>
-    <img src="<?php echo esc_url($photo['fullSize']); ?>" alt="Фото отзыва" class="wb-reviews__photo" />
-    <?php endforeach; ?>
-    <?php endforeach; ?>
-  </div>
-
-  <div class="wb-lightbox" id="wbLightbox">
-    <button class="wb-lightbox__close">&times;</button>
-    <button class="wb-lightbox__nav wb-lightbox__prev">&#8592;</button>
-    <img class="wb-lightbox__img" src="" alt="">
-    <button class="wb-lightbox__nav wb-lightbox__next">&#8594;</button>
-  </div>
-</div>
-<?php
-    $html = ob_get_clean();
-
-    wp_enqueue_style(
-        'wb-reviews-style',
-        WB_REVIEWS_PLUGIN_URL . 'assets/wb-reviews.css',
-        [],
-        WB_REVIEWS_VERSION
-    );
-
-    wp_enqueue_script(
-        'wb-reviews-frontend',
-        WB_REVIEWS_PLUGIN_URL . 'assets/wb-reviews-frontend.js',
-        [],
-        WB_REVIEWS_VERSION,
-        true
-    );
-
-    wp_enqueue_script(
-        'wb-photo-reviews-frontend',
-        WB_REVIEWS_PLUGIN_URL . 'assets/wb-photo-reviews-frontend.js',
-        [],
-        WB_REVIEWS_VERSION,
-        true
-    );
-
-    wp_localize_script('wb-reviews-frontend', 'wb_reviews_data', [
-        'ajaxurl' => admin_url('admin-ajax.php'),
-        'nm_id' => $nm_id,
-    ]);
-
-    return $content . $html;
+    return wb_reviews_get_from_db($nm_id);
 }
 
 function wb_reviews_stars($rating)
@@ -464,4 +319,27 @@ function wb_reviews_ajax_get()
     $feedbacks = wb_reviews_fetch($nm_id);
 
     wp_send_json_success($feedbacks);
+}
+
+add_filter('plugin_action_links_wb-reviews/wb-reviews.php', 'wb_reviews_action_links');
+
+function wb_reviews_action_links($links)
+{
+    $settings_link = '<a href="' . admin_url('options-general.php?page=wb-reviews') . '">Настройки</a>';
+    array_unshift($links, $settings_link);
+    return $links;
+}
+
+add_action('init', function () {
+    if (isset($_GET['wb_warmup']) && current_user_can('manage_options')) {
+        do_action('wb_reviews_cache_warmup');
+        die('Warmup запущен, смотри лог');
+    }
+});
+
+if (defined('WP_CLI') && WP_CLI) {
+    WP_CLI::add_command('wb-reviews warmup', function () {
+        do_action('wb_reviews_cache_warmup');
+        WP_CLI::success('WB Reviews warmup completed.');
+    });
 }
