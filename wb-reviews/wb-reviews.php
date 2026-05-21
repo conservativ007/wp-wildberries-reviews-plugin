@@ -216,16 +216,6 @@ function wb_reviews_fetch($nm_id)
     return wb_reviews_get_from_db($nm_id);
 }
 
-function wb_reviews_stars($rating)
-{
-    $rating = max(0, min(5, intval($rating)));
-    $stars = '';
-    for ($i = 1; $i <= 5; $i++) {
-        $stars .= $i <= $rating ? '★' : '☆';
-    }
-    return '<span class="wb-reviews__star-icons" aria-label="' . $rating . ' из 5">' . $stars . '</span>';
-}
-
 // AJAX
 add_action('wp_ajax_wb_get_reviews', 'wb_reviews_ajax_get');
 add_action('wp_ajax_nopriv_wb_get_reviews', 'wb_reviews_ajax_get');
@@ -243,14 +233,14 @@ function wb_reviews_ajax_get()
     wp_send_json_success($feedbacks);
 }
 
-add_filter('plugin_action_links_wb-reviews/wb-reviews.php', 'wb_reviews_action_links');
+// add_filter('plugin_action_links_wb-reviews/wb-reviews.php', 'wb_reviews_action_links');
 
-function wb_reviews_action_links($links)
-{
-    $settings_link = '<a href="' . admin_url('options-general.php?page=wb-reviews') . '">Настройки</a>';
-    array_unshift($links, $settings_link);
-    return $links;
-}
+// function wb_reviews_action_links($links)
+// {
+//     $settings_link = '<a href="' . admin_url('options-general.php?page=wb-reviews') . '">Настройки</a>';
+//     array_unshift($links, $settings_link);
+//     return $links;
+// }
 
 add_action('init', function () {
     if (isset($_GET['wb_warmup']) && current_user_can('manage_options')) {

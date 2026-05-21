@@ -2,6 +2,16 @@
 if (!defined('ABSPATH'))
   exit;
 
+function wb_reviews_stars($rating)
+{
+  $rating = max(0, min(5, intval($rating)));
+  $stars = '';
+  for ($i = 1; $i <= 5; $i++) {
+    $stars .= $i <= $rating ? '★' : '☆';
+  }
+  return '<span class="wb-reviews__star-icons" aria-label="' . $rating . ' из 5">' . $stars . '</span>';
+}
+
 // ─── Вывод отзывов ───────────────────────────────────────────────────────────
 
 add_filter('the_content', 'wb_reviews_append_to_content');
