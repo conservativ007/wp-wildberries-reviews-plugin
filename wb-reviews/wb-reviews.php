@@ -157,7 +157,7 @@ function wb_reviews_fetch($nm_id, $refresh_from_api = false)
     }
 
     $url = add_query_arg([
-        'isAnswered' => 'false',
+        'isAnswered' => 'true',
         'take' => 200,
         'skip' => 0,
         'nmId' => $nm_id,
