@@ -127,52 +127,53 @@ function wb_reviews_ajax_clear_cache()
 
 // ─── Получение отзывов из API ────────────────────────────────────────────────
 
-function wb_reviews_fetch($nm_id)
+function wb_reviews_fetch($nm_id, $refresh_from_api = false)
 {
-    delete_transient('wb_reviews_error_' . intval($nm_id));
+    $nm_id = absint($nm_id);
+
+    if (!$nm_id) {
+        error_log('[WB Reviews] nmId не указан для записи.');
+        return [];
+    }
+
+    delete_transient('wb_reviews_error_' . $nm_id);
+
+    $from_db = wb_reviews_get_from_db($nm_id);
+    if (!$refresh_from_api && !empty($from_db)) {
+        return $from_db;
+    }
+
+    if (!defined('WB_REVIEWS_WARMUP') || !WB_REVIEWS_WARMUP) {
+        return $from_db;
+    }
 
     $api_key = defined('WB_API_KEY') ? WB_API_KEY : get_option('wb_reviews_api_key', '');
 
     if (empty($api_key)) {
         $msg = '[WB Reviews] API-ключ не задан. Зайди в Настройки → WB Reviews.';
         error_log($msg);
-        set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
-        return [];
-    }
-
-    if (empty($nm_id)) {
-        error_log('[WB Reviews] nmId не указан для записи.');
-        return [];
-    }
-
-    // Сначала проверяем БД
-    $from_db = wb_reviews_get_from_db($nm_id);
-    if (!empty($from_db)) {
+        set_transient('wb_reviews_error_' . $nm_id, $msg, 60);
         return $from_db;
     }
 
-    // Если в БД нет — не идём к API, крон прогреет позже
-    if (!defined('WB_REVIEWS_WARMUP') || !WB_REVIEWS_WARMUP) {
-        return [];
-    }
-
     $url = add_query_arg([
-        'isAnswered' => 'true',
-        'take' => 40,
+        'isAnswered' => 'false',
+        'take' => 200,
         'skip' => 0,
-        'nmId' => intval($nm_id),
+        'nmId' => $nm_id,
+        'order' => 'dateDesc',
     ], 'https://feedbacks-api.wildberries.ru/api/v1/feedbacks');
 
     $response = wp_remote_get($url, [
-        'timeout' => 15,
+        'timeout' => 20,
         'headers' => ['Authorization' => 'Bearer ' . $api_key],
     ]);
 
     if (is_wp_error($response)) {
         $msg = '[WB Reviews] Ошибка запроса: ' . $response->get_error_message();
         error_log($msg);
-        set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
-        return [];
+        set_transient('wb_reviews_error_' . $nm_id, $msg, 60);
+        return $from_db;
     }
 
     $code = wp_remote_retrieve_response_code($response);
@@ -185,35 +186,58 @@ function wb_reviews_fetch($nm_id)
 
         if ($code === 429) {
             $retry_after = (int) wp_remote_retrieve_header($response, 'x-ratelimit-retry');
-            if ($retry_after < 1)
+            if ($retry_after < 1) {
                 $retry_after = 60;
+            }
             error_log('[WB Reviews] 429 для nmId ' . $nm_id . '. Повтор через ' . $retry_after . ' сек.');
-            set_transient('wb_reviews_retry_' . intval($nm_id), $retry_after, 3600);
+            set_transient('wb_reviews_retry_' . $nm_id, $retry_after, 3600);
         }
 
-        set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
-        return [];
+        set_transient('wb_reviews_error_' . $nm_id, $msg, 60);
+        return $from_db;
     }
 
     $data = json_decode($body, true);
 
-    if (json_last_error() !== JSON_ERROR_NONE) {
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
         $msg = '[WB Reviews] Не удалось разобрать JSON. Ответ: ' . $body;
         error_log($msg);
-        set_transient('wb_reviews_error_' . intval($nm_id), $msg, 60);
-        return [];
+        set_transient('wb_reviews_error_' . $nm_id, $msg, 60);
+        return $from_db;
     }
 
     $feedbacks = $data['data']['feedbacks'] ?? [];
-    error_log('[WB Reviews] Получено отзывов: ' . count($feedbacks));
+    $feedbacks = is_array($feedbacks) ? $feedbacks : [];
 
-    if (!empty($feedbacks)) {
-        wb_reviews_save_to_db($nm_id, $feedbacks);
-    } else {
-        error_log('[WB Reviews] Отзывы не найдены для nmId ' . $nm_id);
-    }
+    usort(
+        $feedbacks,
+        static function ($left, $right) {
+            return strtotime($right['createdDate'] ?? '') <=> strtotime($left['createdDate'] ?? '');
+        }
+    );
+
+    $feedbacks = array_slice($feedbacks, 0, 200);
+    $inserted = wb_reviews_save_to_db($nm_id, $feedbacks);
+    error_log(
+        sprintf(
+            '[WB Reviews] Получено: %d, добавлено новых: %d, nmId: %d',
+            count($feedbacks),
+            $inserted,
+            $nm_id
+        )
+    );
 
     return wb_reviews_get_from_db($nm_id);
+}
+
+function wb_reviews_stars($rating)
+{
+    $rating = max(0, min(5, intval($rating)));
+    $stars = '';
+    for ($i = 1; $i <= 5; $i++) {
+        $stars .= $i <= $rating ? '★' : '☆';
+    }
+    return '<span class="wb-reviews__star-icons" aria-label="' . $rating . ' из 5">' . $stars . '</span>';
 }
 
 // AJAX
@@ -233,14 +257,14 @@ function wb_reviews_ajax_get()
     wp_send_json_success($feedbacks);
 }
 
-// add_filter('plugin_action_links_wb-reviews/wb-reviews.php', 'wb_reviews_action_links');
+add_filter('plugin_action_links_wb-reviews/wb-reviews.php', 'wb_reviews_action_links');
 
-// function wb_reviews_action_links($links)
-// {
-//     $settings_link = '<a href="' . admin_url('options-general.php?page=wb-reviews') . '">Настройки</a>';
-//     array_unshift($links, $settings_link);
-//     return $links;
-// }
+function wb_reviews_action_links($links)
+{
+    $settings_link = '<a href="' . admin_url('options-general.php?page=wb-reviews') . '">Настройки</a>';
+    array_unshift($links, $settings_link);
+    return $links;
+}
 
 add_action('init', function () {
     if (isset($_GET['wb_warmup']) && current_user_can('manage_options')) {

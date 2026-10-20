@@ -71,6 +71,13 @@ function wb_reviews_remove_from_queue($nm_id)
 
 add_action('wb_reviews_cache_warmup', 'wb_reviews_do_warmup');
 
+function wb_reviews_is_eligible_product($post_id)
+{
+  return 'product' === get_post_type($post_id)
+    && 'publish' === get_post_status($post_id)
+    && 'instock' === get_post_meta($post_id, '_stock_status', true);
+}
+
 function wb_reviews_do_warmup()
 {
   if (!defined('WB_REVIEWS_WARMUP')) {
@@ -80,6 +87,7 @@ function wb_reviews_do_warmup()
   $nm_id = '';
   $post_id = 0;
   $title = '';
+  $next_position = null;
 
   $queue = wb_reviews_get_warmup_queue();
 
@@ -87,26 +95,28 @@ function wb_reviews_do_warmup()
     $item = array_shift($queue);
     wb_reviews_update_warmup_queue($queue);
 
-    $nm_id = preg_replace('/\D/', '', (string) ($item['nm_id'] ?? ''));
-    $post_id = (int) ($item['post_id'] ?? 0);
+    $candidate_nm_id = preg_replace('/\D/', '', (string) ($item['nm_id'] ?? ''));
+    $candidate_post_id = (int) ($item['post_id'] ?? 0);
 
-    if ($nm_id === '') {
+    if ($candidate_nm_id === '') {
       wb_warmup_log('Очередь: пропущена пустая запись');
       continue;
     }
 
-    if (!empty(wb_reviews_get_from_db($nm_id))) {
-      wb_warmup_log("Очередь: пропуск $nm_id, отзывы уже есть в БД");
+    if (!wb_reviews_is_eligible_product($candidate_post_id)) {
+      wb_warmup_log("Очередь: пропуск $candidate_nm_id, товар не опубликован или нет в наличии");
       continue;
     }
 
-    $title = $post_id ? get_the_title($post_id) : '';
+    $nm_id = $candidate_nm_id;
+    $post_id = $candidate_post_id;
+    $title = get_the_title($post_id);
     wb_warmup_log("Очередь: взят nmId $nm_id | post_id: $post_id | $title");
     break;
   }
 
   if ($nm_id === '') {
-    wb_warmup_log('Очередь пуста, запускаем поиск непрогретых товаров');
+    wb_warmup_log('Очередь пуста, ищем опубликованные товары в наличии');
 
     $field_name = get_option('wb_reviews_custom_field', 'wb_nm_id');
     $posts = get_posts([
@@ -114,11 +124,19 @@ function wb_reviews_do_warmup()
       'post_status' => 'publish',
       'numberposts' => -1,
       'fields' => 'ids',
-      'meta_query' => [[
-        'key' => $field_name,
-        'value' => '',
-        'compare' => '!='
-      ]],
+      'meta_query' => [
+        'relation' => 'AND',
+        [
+          'key' => $field_name,
+          'value' => '',
+          'compare' => '!=',
+        ],
+        [
+          'key' => '_stock_status',
+          'value' => 'instock',
+          'compare' => '=',
+        ],
+      ],
       'meta_key' => $field_name,
       'orderby' => 'ID',
       'order' => 'ASC',
@@ -134,46 +152,34 @@ function wb_reviews_do_warmup()
 
     if ($position >= $total) {
       $position = 0;
-      wb_warmup_log('Очередь прошла полный круг, начинаем сначала');
+      wb_warmup_log('Круг завершён, начинаем сначала');
     }
 
-    $found = false;
-    while ($position < $total) {
-      $post_id = $posts[$position];
-      $nm_id = get_post_meta($post_id, $field_name, true);
-      $title = get_the_title($post_id);
-      $existing = wb_reviews_get_from_db($nm_id);
+    $post_id = (int) $posts[$position];
+    $nm_id = preg_replace('/\D/', '', (string) get_post_meta($post_id, $field_name, true));
+    $title = get_the_title($post_id);
 
-      if (!empty($existing)) {
-        wb_warmup_log("⏭ Пропущен (уже в БД): $nm_id | $title");
-        $position++;
-        continue;
-      }
-
-      $found = true;
-      break;
-    }
-
-    if (!$found) {
-      wb_warmup_log('Все товары уже в БД, начинаем сначала');
-      update_option('wb_reviews_warmup_position', 0);
+    if ($nm_id === '') {
+      wb_warmup_log("Позиция $position/$total: пустой nmId");
       return;
     }
 
     wb_warmup_log("Позиция $position/$total | nmId: $nm_id | $title");
-    update_option('wb_reviews_warmup_position', $position + 1);
+    $next_position = ($position + 1) % $total;
   }
 
   if ($nm_id) {
-    wb_reviews_fetch($nm_id);
+    wb_reviews_fetch($nm_id, true);
 
-    $from_db = wb_reviews_get_from_db($nm_id);
     $error = get_transient('wb_reviews_error_' . intval($nm_id));
 
-    if (!empty($from_db)) {
-      wb_warmup_log("✓ Сохранено в БД: $nm_id, записей: " . count($from_db));
+    if ($error) {
+      wb_warmup_log("✗ Ошибка: $nm_id | $error");
     } else {
-      wb_warmup_log("✗ Не удалось: $nm_id | Ошибка: " . ($error ?: 'нет ошибки, просто пустой ответ'));
+      if (null !== $next_position) {
+        update_option('wb_reviews_warmup_position', $next_position);
+      }
+      wb_warmup_log("✓ Синхронизировано: $nm_id");
     }
   }
 }
